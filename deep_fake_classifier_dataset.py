@@ -96,10 +96,10 @@ def blackout_random(image):
     return image
 
 class DeepFakeClassifierDataset(Dataset):
-    def __init__(self, metadata, processed_data_path, image_size, mode,
+    def __init__(self, metadata, processed_data_path, mode,
                 normalize={"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]},
                 blackout_probability=0.42,
-                rotate=True, transform=True):
+                rotate=True, transform=True, image_size=None):
         self.metadata = metadata
         self.processed_data_path = processed_data_path
         self.mode = mode
@@ -107,13 +107,20 @@ class DeepFakeClassifierDataset(Dataset):
         self.blackout_probability = blackout_probability
         self.rotate = rotate
         self.transform = transform
-        if transform:
+        self.image_size = image_size
+        if transform and image_size is not None:
+            self.transforms = create_transforms(image_size)
+            
+    def set_image_size(self, image_size):
+        self.image_size = image_size
+        if self.transform and image_size is not None:
             self.transforms = create_transforms(image_size)
     
     def __getitem__(self, index):
         vid, cid, label = self.metadata.loc[index]
         img_path = os.path.join(self.processed_data_path, 'crops', vid, '{}.png'.format(cid))
         img = cv2.imread(img_path)
+        img = cv2.resize(img, (self.image_size, self.image_size))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         if self.mode == 'train':
             if self.transform:

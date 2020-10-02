@@ -1,5 +1,5 @@
 import time
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 class Log(object):
     def __init__(self):
