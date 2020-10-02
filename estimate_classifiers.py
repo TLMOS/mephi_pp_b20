@@ -18,6 +18,7 @@ from torch import nn
 from torch.nn.modules.dropout import Dropout
 from torch.nn.modules.linear import Linear
 from torch.nn.modules.pooling import AdaptiveAvgPool2d
+from torch.nn import DataParallel
 from sklearn.metrics import accuracy_score
 from ptflops.flops_counter import get_model_complexity_info
 from functools import partial
@@ -132,7 +133,7 @@ def evaluate_classifier(model, data, metric, average_prediction=None, log=None):
 
 def estimate_classifiers(data_train, data_test, classifier, classifier_params, encoders,
                          loss_function, metric, batch_size, epochs, freeze_epochs=None,
-                         average_prediction=None, save_models=False):
+                         average_prediction=None, save_models=False, multiple_gpus=False):
     log = Log()
     log.log('{:-^70}'.format('Estimating {} classifiers'.format(len(encoders))))
     summary = []
@@ -143,6 +144,8 @@ def estimate_classifiers(data_train, data_test, classifier, classifier_params, e
         encoder = encoder_inits[encoder_id]().cuda()
         encoder_features = encoder.num_features
         model = classifier(encoder, encoder_features, *classifier_params).cuda()
+        if multiple_gpus:
+            model = DataParallel(model).cuda()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0002)
         loss_function = loss_function.cuda()
         log.log('Initialized')
@@ -151,11 +154,17 @@ def estimate_classifiers(data_train, data_test, classifier, classifier_params, e
         mean_dur = 0
         model.train()
         if freeze_epochs is not None and freeze_epochs != 0:
-            model.freeze_encoder()
+            if type(model) == DataParallel:
+                model.module.freeze_encoder()
+            else:
+                model.freeze_encoder()
 
         for epoch in log.tqdm(range(epochs), 'Training'):
             if epoch == freeze_epochs:
-                model.unfreeze_encoder()
+                if type(model) == DataParallel:
+                    model.module.unfreeze_encoder()
+                else:
+                    model.unfreeze_encoder()
 
             train_data_loader = DataLoader(data_train, batch_size=batch_size, shuffle=True,
                                            drop_last=True)
@@ -203,6 +212,7 @@ if __name__ == '__main__':
     predictions_path    = config['Paths']['predictions_path']
     summary_path        = config['Paths']['summary_path']
     encoders            = config['Encoders']['encoders'].split(',')
+    multiple_gpus       = config['Training']['multiple_gpus'] == 'True'
     batch_size          = int(config['Training']['batch_size'])
     epochs              = int(config['Training']['epochs'])
     freeze_epochs       = int(config['Training']['freeze_epochs'])
@@ -228,7 +238,8 @@ if __name__ == '__main__':
                      classifier_params=(dropout_rate,), encoders=encoders, 
                      loss_function=torch.nn.BCELoss(), metric=accuracy_score,
                      batch_size=batch_size, epochs=epochs, freeze_epochs=freeze_epochs,
-                     average_prediction=confident_strategy, save_models=True)
+                     average_prediction=confident_strategy, save_models=True,
+                     multiple_gpus=multiple_gpus)
     
     save_time = int(time.time())
     with open(os.path.join(summary_path, '{}_summary.json'.format(save_time)), 'w') as f:
